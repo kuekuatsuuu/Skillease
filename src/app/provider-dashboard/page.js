@@ -5,75 +5,108 @@ import { useAuth } from '../context/AuthContext'
 import { supabase } from '../lib/supabase'
 import ProtectedRoute from '../components/auth/ProtectedRoute'
 import BookingCard from '../components/BookingCard'
-import { Calendar, Bell, MapPin, Star, DollarSign, Users, Settings, LogOut } from 'lucide-react'
+import CreateService from '../components/CreateService'
+import { 
+  Calendar, 
+  Bell, 
+  MapPin, 
+  Star, 
+  DollarSign, 
+  Users, 
+  Settings, 
+  LogOut, 
+  Plus,
+  Edit,
+  Eye,
+  TrendingUp
+} from 'lucide-react'
 import { useRouter } from 'next/navigation'
+import toast from 'react-hot-toast'
 
 export default function ProviderDashboard() {
   const { user, signOut } = useAuth()
   const router = useRouter()
   const [bookings, setBookings] = useState([])
+  const [services, setServices] = useState([])
   const [loading, setLoading] = useState(true)
+  const [showCreateService, setShowCreateService] = useState(false)
   const [stats, setStats] = useState({
     pendingBookings: 0,
     confirmedBookings: 0,
     completedBookings: 0,
-    totalEarnings: 0
+    totalEarnings: 0,
+    totalServices: 0
   })
 
   useEffect(() => {
-    fetchBookings()
-    fetchStats()
+    fetchData()
   }, [user])
 
-  const fetchBookings = async () => {
+  const fetchData = async () => {
     if (!user) return
 
-    const { data, error } = await supabase
-      .from('bookings')
-      .select(`
-        *,
-        services!bookings_service_id_fkey (
-          title,
-          category,
-          price_per_hour,
-          latitude,
-          longitude
-        ),
-        profiles!bookings_customer_id_fkey (
-          full_name,
-          phone,
-          email
-        )
-      `)
-      .eq('provider_id', user.id)
-      .order('created_at', { ascending: false })
+    try {
+      // Fetch bookings
+      const { data: bookingsData } = await supabase
+        .from('bookings')
+        .select(`
+          *,
+          services!bookings_service_id_fkey (
+            title,
+            category,
+            price_per_hour,
+            latitude,
+            longitude
+          ),
+          profiles!bookings_customer_id_fkey (
+            full_name,
+            phone,
+            email
+          )
+        `)
+        .eq('provider_id', user.id)
+        .order('created_at', { ascending: false })
 
-    if (data) {
-      setBookings(data)
-    }
-    setLoading(false)
-  }
+      if (bookingsData) {
+        setBookings(bookingsData)
+      }
 
-  const fetchStats = async () => {
-    if (!user) return
+      // Fetch services
+      const { data: servicesData } = await supabase
+        .from('services')
+        .select('*')
+        .eq('provider_id', user.id)
+        .order('created_at', { ascending: false })
 
-    const { data } = await supabase
-      .from('bookings')
-      .select('status, total_price')
-      .eq('provider_id', user.id)
+      if (servicesData) {
+        setServices(servicesData)
+      }
 
-    if (data) {
-      const stats = data.reduce((acc, booking) => {
-        if (booking.status === 'pending') acc.pendingBookings++
-        if (booking.status === 'confirmed') acc.confirmedBookings++
-        if (booking.status === 'completed') {
-          acc.completedBookings++
-          acc.totalEarnings += parseFloat(booking.total_price || 0)
-        }
-        return acc
-      }, { pendingBookings: 0, confirmedBookings: 0, completedBookings: 0, totalEarnings: 0 })
+      // Calculate stats
+      if (bookingsData) {
+        const stats = bookingsData.reduce((acc, booking) => {
+          if (booking.status === 'pending') acc.pendingBookings++
+          if (booking.status === 'confirmed') acc.confirmedBookings++
+          if (booking.status === 'completed') {
+            acc.completedBookings++
+            acc.totalEarnings += parseFloat(booking.total_price || 0)
+          }
+          return acc
+        }, { 
+          pendingBookings: 0, 
+          confirmedBookings: 0, 
+          completedBookings: 0, 
+          totalEarnings: 0,
+          totalServices: servicesData?.length || 0
+        })
 
-      setStats(stats)
+        setStats(stats)
+      }
+    } catch (error) {
+      console.error('Error fetching data:', error)
+      toast.error('Failed to load dashboard data')
+    } finally {
+      setLoading(false)
     }
   }
 
@@ -83,7 +116,13 @@ export default function ProviderDashboard() {
         ? { ...booking, status: newStatus }
         : booking
     ))
-    fetchStats() // Refresh stats
+    fetchData() // Refresh stats
+  }
+
+  const handleServiceCreated = (newService) => {
+    setServices([newService, ...services])
+    setStats(prev => ({ ...prev, totalServices: prev.totalServices + 1 }))
+    toast.success('Service created successfully!')
   }
 
   const handleLogout = async () => {
@@ -121,10 +160,17 @@ export default function ProviderDashboard() {
             <div className="flex items-center justify-between">
               <div>
                 <h1 className="text-3xl font-bold mb-2">Provider Dashboard</h1>
-                <p className="text-blue-100">Manage bookings • Track customer locations • Grow your business</p>
+                <p className="text-blue-100">Manage services • Track bookings • Grow your business</p>
               </div>
               
               <div className="flex items-center space-x-4">
+                <button 
+                  onClick={() => setShowCreateService(true)}
+                  className="bg-white/20 hover:bg-white/30 px-4 py-2 rounded-lg font-medium transition-colors flex items-center"
+                >
+                  <Plus className="h-4 w-4 mr-2" />
+                  Add Service
+                </button>
                 <button className="text-blue-100 hover:text-white transition-colors">
                   <Settings className="h-6 w-6" />
                 </button>
@@ -142,7 +188,19 @@ export default function ProviderDashboard() {
 
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
           {/* Stats Cards */}
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+          <div className="grid grid-cols-1 md:grid-cols-5 gap-6 mb-8">
+            <div className="bg-white rounded-2xl p-6 shadow-sm border border-purple-200 hover:shadow-md transition-shadow">
+              <div className="flex items-center">
+                <div className="bg-purple-100 p-4 rounded-xl">
+                  <TrendingUp className="h-8 w-8 text-purple-600" />
+                </div>
+                <div className="ml-4">
+                  <p className="text-sm font-medium text-gray-600">My Services</p>
+                  <p className="text-3xl font-bold text-purple-600">{stats.totalServices}</p>
+                </div>
+              </div>
+            </div>
+
             <div className="bg-white rounded-2xl p-6 shadow-sm border border-orange-200 hover:shadow-md transition-shadow">
               <div className="flex items-center">
                 <div className="bg-orange-100 p-4 rounded-xl">
@@ -192,6 +250,89 @@ export default function ProviderDashboard() {
             </div>
           </div>
 
+          {/* My Services Section */}
+          <div className="mb-8">
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-2xl font-bold text-gray-900 flex items-center">
+                <TrendingUp className="h-7 w-7 mr-3 text-blue-500" />
+                My Services
+                <span className="ml-3 bg-blue-500 text-white px-3 py-1 rounded-full text-sm font-bold">
+                  {services.length}
+                </span>
+              </h2>
+              <button
+                onClick={() => setShowCreateService(true)}
+                className="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white px-6 py-3 rounded-xl font-medium transition-all duration-300 flex items-center"
+              >
+                <Plus className="h-5 w-5 mr-2" />
+                Add New Service
+              </button>
+            </div>
+
+            {services.length > 0 ? (
+              <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {services.map((service) => (
+                  <div key={service.id} className="bg-white rounded-2xl p-6 shadow-lg border border-gray-100 hover:shadow-xl transition-all duration-300">
+                    <div className="flex items-start justify-between mb-4">
+                      <div className="flex-1">
+                        <h3 className="text-lg font-bold text-gray-900 mb-2">{service.title}</h3>
+                        <p className="text-gray-600 text-sm mb-3 line-clamp-2">{service.description}</p>
+                        <div className="flex items-center text-sm text-gray-500 mb-2">
+                          <MapPin className="h-4 w-4 mr-1" />
+                          <span>{service.city}</span>
+                        </div>
+                        <div className="flex items-center text-sm text-green-600 font-semibold">
+                          <DollarSign className="h-4 w-4 mr-1" />
+                          <span>₹{service.price_per_hour}/hour</span>
+                        </div>
+                      </div>
+                      <div className="text-6xl ml-4">
+                        {service.category === 'electrician' && '⚡'}
+                        {service.category === 'plumber' && '🔧'}
+                        {service.category === 'tutor' && '📚'}
+                        {service.category === 'cleaner' && '🧹'}
+                        {service.category === 'fitness trainer' && '💪'}
+                        {service.category === 'photographer' && '📸'}
+                        {service.category === 'gardener' && '🌱'}
+                        {service.category === 'painter' && '🎨'}
+                        {service.category === 'carpenter' && '🔨'}
+                        {service.category === 'mechanic' && '⚙️'}
+                      </div>
+                    </div>
+                    
+                    <div className="flex items-center justify-between pt-4 border-t border-gray-100">
+                      <div className="flex items-center text-sm">
+                        <Star className="h-4 w-4 text-yellow-500 mr-1" />
+                        <span className="font-medium">{service.average_rating?.toFixed(1)}</span>
+                        <span className="text-gray-500 ml-1">({service.total_reviews} reviews)</span>
+                      </div>
+                      <div className="flex space-x-2">
+                        <button className="text-blue-600 hover:text-blue-700 p-2">
+                          <Edit className="h-4 w-4" />
+                        </button>
+                        <button className="text-gray-600 hover:text-gray-700 p-2">
+                          <Eye className="h-4 w-4" />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="text-center py-12 bg-white rounded-2xl shadow-sm">
+                <div className="text-6xl mb-4">🏢</div>
+                <h3 className="text-xl font-bold text-gray-900 mb-3">No services yet</h3>
+                <p className="text-gray-600 mb-6">Create your first service to start receiving bookings</p>
+                <button
+                  onClick={() => setShowCreateService(true)}
+                  className="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white px-8 py-3 rounded-xl font-medium transition-all duration-300"
+                >
+                  Create Your First Service
+                </button>
+              </div>
+            )}
+          </div>
+
           {/* Urgent Pending Bookings */}
           {pendingBookings.length > 0 && (
             <div className="mb-8">
@@ -221,29 +362,58 @@ export default function ProviderDashboard() {
             </div>
           )}
 
+          {/* Confirmed Bookings */}
+          {confirmedBookings.length > 0 && (
+            <div className="mb-8">
+              <h2 className="text-2xl font-bold text-gray-900 mb-6 flex items-center">
+                <Calendar className="h-7 w-7 mr-3 text-blue-500" />
+                Upcoming Bookings
+                <span className="ml-3 bg-blue-500 text-white px-3 py-1 rounded-full text-sm font-bold">
+                  {confirmedBookings.length}
+                </span>
+              </h2>
+              
+              <div className="grid gap-6">
+                {confirmedBookings.map((booking) => (
+                  <BookingCard
+                    key={booking.id}
+                    booking={booking}
+                    onStatusUpdate={handleBookingStatusUpdate}
+                    isProvider={true}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* Empty State */}
-          {bookings.length === 0 && (
+          {bookings.length === 0 && services.length === 0 && (
             <div className="text-center py-16">
               <div className="bg-white rounded-2xl p-12 shadow-sm">
                 <MapPin className="h-20 w-20 text-gray-400 mx-auto mb-6" />
-                <h3 className="text-2xl font-bold text-gray-900 mb-4">Ready for Your First Booking!</h3>
+                <h3 className="text-2xl font-bold text-gray-900 mb-4">Welcome to Your Provider Dashboard!</h3>
                 <p className="text-gray-600 text-lg mb-6">
-                  Your booking requests will appear here with detailed customer location information
+                  Start by creating your first service to begin receiving bookings
                 </p>
-                <div className="bg-blue-50 p-4 rounded-xl">
-                  <p className="text-blue-800 font-medium">
-                    ✨ When customers book your services, you'll see:
-                  </p>
-                  <ul className="text-blue-700 mt-2 space-y-1">
-                    <li>• Exact distance to customer location</li>
-                    <li>• Estimated travel time</li>
-                    <li>• One-click navigation to their address</li>
-                  </ul>
-                </div>
+                <button
+                  onClick={() => setShowCreateService(true)}
+                  className="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white px-8 py-4 rounded-xl font-semibold transition-all duration-300 transform hover:-translate-y-1 shadow-lg"
+                >
+                  <Plus className="h-5 w-5 mr-2 inline" />
+                  Create Your First Service
+                </button>
               </div>
             </div>
           )}
         </div>
+
+        {/* Create Service Modal */}
+        {showCreateService && (
+          <CreateService
+            onClose={() => setShowCreateService(false)}
+            onServiceCreated={handleServiceCreated}
+          />
+        )}
       </div>
     </ProtectedRoute>
   )

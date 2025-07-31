@@ -314,7 +314,7 @@ export default function HomePage() {
           
           <div className="border-t border-gray-800 pt-8 text-center">
             <p className="text-gray-400">
-              © 2024 LocalConnect. Built with ❤️ for connecting communities.
+              © 2024 SkilLease. Built with ❤️ for connecting communities.
             </p>
           </div>
         </div>

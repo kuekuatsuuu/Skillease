@@ -3,11 +3,12 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
 import { getCurrentLocation, calculateDistance, getDistanceMatrix, formatDistance, getLocationName } from '../lib/locationUtils'
-import { MapPin, Navigation, Clock, User, Phone, CheckCircle, XCircle, Loader, MessageSquare } from 'lucide-react'
+import { MapPin, Navigation, Clock, User, Phone, CheckCircle, XCircle, Loader, MessageSquare, AlertTriangle } from 'lucide-react'
+import toast from 'react-hot-toast'
 
 export default function BookingCard({ booking, onStatusUpdate, isProvider = false }) {
   const [customerLocation, setCustomerLocation] = useState(null)
-  const [distance, setDistance] = useState(null)
+  const [distance, setDistance] = useState(booking.distance_km || null)
   const [travelTime, setTravelTime] = useState(null)
   const [locationName, setLocationName] = useState('')
   const [loading, setLoading] = useState(false)
@@ -15,24 +16,49 @@ export default function BookingCard({ booking, onStatusUpdate, isProvider = fals
 
   useEffect(() => {
     if (isProvider && booking.status === 'pending') {
-      trackCustomerLocation()
+      // If we have stored customer location, use it
+      if (booking.customer_current_lat && booking.customer_current_lng) {
+        setCustomerLocation({
+          latitude: booking.customer_current_lat,
+          longitude: booking.customer_current_lng
+        })
+        setDistance(booking.distance_km)
+      } else {
+        // Track customer location for new bookings
+        trackCustomerLocation()
+      }
     }
   }, [booking, isProvider])
+
+  useEffect(() => {
+    if (customerLocation && distance) {
+      calculateTravelTime()
+      getLocationDetails()
+    }
+  }, [customerLocation, distance])
 
   const trackCustomerLocation = async () => {
     try {
       setTrackingLocation(true)
       
-      // Simulate getting customer's current location (in real app, this would be from the customer's device)
-      // For demo, we'll use a location near the service provider
+      // If customer provided location, use it
+      if (booking.customer_current_lat && booking.customer_current_lng) {
+        const location = {
+          latitude: booking.customer_current_lat,
+          longitude: booking.customer_current_lng
+        }
+        setCustomerLocation(location)
+        return
+      }
+
+      // Otherwise simulate location (in real app, this would come from customer's device)
       let location
       
-      // If we have provider coordinates, place customer randomly nearby (1-5km radius)
-      if (booking.service?.latitude && booking.service?.longitude) {
+      if (booking.services?.latitude && booking.services?.longitude) {
         const randomDistance = 1 + Math.random() * 4 // 1-5 km
         const randomAngle = Math.random() * 2 * Math.PI
-        const lat = booking.service.latitude + (randomDistance / 111) * Math.cos(randomAngle)
-        const lng = booking.service.longitude + (randomDistance / 111) * Math.sin(randomAngle)
+        const lat = booking.services.latitude + (randomDistance / 111) * Math.cos(randomAngle)
+        const lng = booking.services.longitude + (randomDistance / 111) * Math.sin(randomAngle)
         
         location = { latitude: lat, longitude: lng }
       } else {
@@ -46,38 +72,14 @@ export default function BookingCard({ booking, onStatusUpdate, isProvider = fals
       setCustomerLocation(location)
       
       // Calculate distance if provider has location
-      if (booking.service?.latitude && booking.service?.longitude) {
+      if (booking.services?.latitude && booking.services?.longitude) {
         const dist = calculateDistance(
           location.latitude,
           location.longitude,
-          booking.service.latitude,
-          booking.service.longitude
+          booking.services.latitude,
+          booking.services.longitude
         )
         setDistance(dist)
-
-        // Get travel time from Google Maps
-        try {
-          const distanceData = await getDistanceMatrix(
-            [{ lat: booking.service.latitude, lng: booking.service.longitude }],
-            [{ lat: location.latitude, lng: location.longitude }]
-          )
-          
-          if (distanceData && distanceData.duration) {
-            setTravelTime(distanceData.duration.text)
-          } else {
-            // Estimate travel time based on distance (rough calculation)
-            const estimatedMinutes = Math.round(dist * 3) // ~3 minutes per km in city
-            setTravelTime(`~${estimatedMinutes} mins`)
-          }
-        } catch (error) {
-          console.log('Travel time estimation failed, using distance-based estimate')
-          const estimatedMinutes = Math.round(dist * 3)
-          setTravelTime(`~${estimatedMinutes} mins`)
-        }
-
-        // Get location name
-        const name = await getLocationName(location.latitude, location.longitude)
-        setLocationName(name)
 
         // Update booking in database
         await supabase
@@ -96,18 +98,64 @@ export default function BookingCard({ booking, onStatusUpdate, isProvider = fals
     }
   }
 
+  const calculateTravelTime = async () => {
+    if (!customerLocation || !booking.services?.latitude || !booking.services?.longitude) return
+
+    try {
+      const distanceData = await getDistanceMatrix(
+        [{ lat: booking.services.latitude, lng: booking.services.longitude }],
+        [{ lat: customerLocation.latitude, lng: customerLocation.longitude }]
+      )
+      
+      if (distanceData && distanceData.duration) {
+        setTravelTime(distanceData.duration.text)
+      } else {
+        // Estimate travel time based on distance
+        const estimatedMinutes = Math.round(distance * 3) // ~3 minutes per km in city
+        setTravelTime(`~${estimatedMinutes} mins`)
+      }
+    } catch (error) {
+      console.log('Travel time estimation failed, using distance-based estimate')
+      const estimatedMinutes = Math.round(distance * 3)
+      setTravelTime(`~${estimatedMinutes} mins`)
+    }
+  }
+
+  const getLocationDetails = async () => {
+    if (!customerLocation) return
+
+    try {
+      const name = await getLocationName(customerLocation.latitude, customerLocation.longitude)
+      setLocationName(name)
+    } catch (error) {
+      console.error('Failed to get location name:', error)
+    }
+  }
+
   const handleStatusUpdate = async (newStatus) => {
     setLoading(true)
     
     try {
+      const updateData = { 
+        status: newStatus,
+        updated_at: new Date().toISOString()
+      }
+
+      if (newStatus === 'confirmed') {
+        updateData.provider_notes = `Booking accepted. Customer is ${formatDistance(distance)} away.`
+        
+        // Send notification to customer for payment
+        await sendCustomerNotification(booking, 'accepted')
+        toast.success('Booking accepted! Customer will be notified for payment.')
+      } else if (newStatus === 'cancelled') {
+        updateData.provider_notes = 'Booking declined by provider'
+        await sendCustomerNotification(booking, 'declined')
+        toast.success('Booking declined. Customer has been notified.')
+      }
+
       const { error } = await supabase
         .from('bookings')
-        .update({ 
-          status: newStatus,
-          provider_notes: newStatus === 'confirmed' 
-            ? `Booking confirmed. Customer is ${formatDistance(distance)} away.`
-            : 'Booking cancelled by provider'
-        })
+        .update(updateData)
         .eq('id', booking.id)
 
       if (!error) {
@@ -115,14 +163,38 @@ export default function BookingCard({ booking, onStatusUpdate, isProvider = fals
       }
     } catch (error) {
       console.error('Failed to update booking:', error)
+      toast.error('Failed to update booking status')
     } finally {
       setLoading(false)
     }
   }
 
+  const sendCustomerNotification = async (booking, action) => {
+    try {
+      // In a real app, you'd send push notifications, emails, or SMS
+      console.log('Customer notification:', {
+        customerId: booking.customer_id,
+        bookingId: booking.id,
+        action: action,
+        message: action === 'accepted' 
+          ? `Your booking for ${booking.services?.title} has been accepted! Please complete payment.`
+          : `Your booking for ${booking.services?.title} has been declined. Please try another provider.`
+      })
+
+      // You could integrate with:
+      // - Firebase FCM for push notifications
+      // - SendGrid/Mailgun for emails
+      // - Twilio for SMS
+      // - In-app notification system
+      
+    } catch (error) {
+      console.error('Failed to send customer notification:', error)
+    }
+  }
+
   const openInMaps = () => {
-    if (customerLocation && booking.service?.latitude && booking.service?.longitude) {
-      const url = `https://www.google.com/maps/dir/${booking.service.latitude},${booking.service.longitude}/${customerLocation.latitude},${customerLocation.longitude}`
+    if (customerLocation && booking.services?.latitude && booking.services?.longitude) {
+      const url = `https://www.google.com/maps/dir/${booking.services.latitude},${booking.services.longitude}/${customerLocation.latitude},${customerLocation.longitude}`
       window.open(url, '_blank')
     }
   }
@@ -138,8 +210,8 @@ export default function BookingCard({ booking, onStatusUpdate, isProvider = fals
       {/* Booking Header */}
       <div className="flex items-start justify-between mb-4">
         <div>
-          <h3 className="text-xl font-bold text-gray-900">{booking.service?.title}</h3>
-          <p className="text-gray-600 capitalize">{booking.service?.category}</p>
+          <h3 className="text-xl font-bold text-gray-900">{booking.services?.title}</h3>
+          <p className="text-gray-600 capitalize">{booking.services?.category}</p>
           <p className="text-sm text-gray-500 mt-1">
             Booking ID: {booking.id.slice(0, 8)}...
           </p>
@@ -202,7 +274,7 @@ export default function BookingCard({ booking, onStatusUpdate, isProvider = fals
         <div className="bg-gradient-to-r from-blue-50 to-purple-50 rounded-xl p-4 mb-4 border border-blue-200">
           <h4 className="font-semibold text-gray-900 mb-3 flex items-center">
             <MapPin className="h-5 w-5 mr-2 text-blue-600" />
-            Customer Location
+            Customer Location & Distance
           </h4>
           
           {trackingLocation ? (
@@ -235,18 +307,20 @@ export default function BookingCard({ booking, onStatusUpdate, isProvider = fals
                 </div>
               )}
               
-              <button
-                onClick={openInMaps}
-                className="w-full bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white px-4 py-3 rounded-lg font-medium transition-all duration-300 flex items-center justify-center"
-              >
-                <Navigation className="h-5 w-5 mr-2" />
-                Navigate to Customer
-              </button>
+              {customerLocation && (
+                <button
+                  onClick={openInMaps}
+                  className="w-full bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white px-4 py-3 rounded-lg font-medium transition-all duration-300 flex items-center justify-center"
+                >
+                  <Navigation className="h-5 w-5 mr-2" />
+                  Navigate to Customer
+                </button>
+              )}
             </div>
           ) : (
             <div className="text-center py-4 text-gray-500">
               <MapPin className="h-8 w-8 mx-auto mb-2 text-gray-400" />
-              <p>Location will be available when you accept the booking</p>
+              <p>Customer location will be available when you accept the booking</p>
             </div>
           )}
         </div>
@@ -254,28 +328,88 @@ export default function BookingCard({ booking, onStatusUpdate, isProvider = fals
 
       {/* Action Buttons for Providers */}
       {isProvider && booking.status === 'pending' && (
-        <div className="flex space-x-3 mb-4">
-          <button
-            onClick={() => handleStatusUpdate('confirmed')}
-            disabled={loading}
-            className="flex-1 bg-green-600 hover:bg-green-700 text-white px-4 py-3 rounded-xl font-medium transition-colors disabled:opacity-50 flex items-center justify-center"
-          >
-            {loading ? (
-              <Loader className="h-5 w-5 mr-2 animate-spin" />
-            ) : (
-              <CheckCircle className="h-5 w-5 mr-2" />
-            )}
-            Accept Booking
-          </button>
-          
-          <button
-            onClick={() => handleStatusUpdate('cancelled')}
-            disabled={loading}
-            className="flex-1 bg-red-600 hover:bg-red-700 text-white px-4 py-3 rounded-xl font-medium transition-colors disabled:opacity-50 flex items-center justify-center"
-          >
-            <XCircle className="h-5 w-5 mr-2" />
-            Decline
-          </button>
+        <div className="mb-4">
+          {/* Distance Warning */}
+          {distance && distance > 10 && (
+            <div className="bg-orange-50 border border-orange-200 rounded-lg p-3 mb-4 flex items-start">
+              <AlertTriangle className="h-5 w-5 text-orange-500 mr-2 mt-0.5" />
+              <div>
+                <p className="text-sm font-medium text-orange-800">Distance Notice</p>
+                <p className="text-sm text-orange-700">
+                  Customer is {formatDistance(distance)} away. Consider if this distance works for you.
+                </p>
+              </div>
+            </div>
+          )}
+
+          <div className="flex space-x-3">
+            <button
+              onClick={() => handleStatusUpdate('confirmed')}
+              disabled={loading}
+              className="flex-1 bg-green-600 hover:bg-green-700 text-white px-4 py-3 rounded-xl font-medium transition-colors disabled:opacity-50 flex items-center justify-center"
+            >
+              {loading ? (
+                <Loader className="h-5 w-5 mr-2 animate-spin" />
+              ) : (
+                <CheckCircle className="h-5 w-5 mr-2" />
+              )}
+              Accept Booking
+            </button>
+            
+            <button
+              onClick={() => handleStatusUpdate('cancelled')}
+              disabled={loading}
+              className="flex-1 bg-red-600 hover:bg-red-700 text-white px-4 py-3 rounded-xl font-medium transition-colors disabled:opacity-50 flex items-center justify-center"
+            >
+              <XCircle className="h-5 w-5 mr-2" />
+              Decline
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Accepted Booking Info */}
+      {isProvider && booking.status === 'confirmed' && (
+        <div className="bg-green-50 border border-green-200 rounded-lg p-4 mb-4">
+          <div className="flex items-center mb-2">
+            <CheckCircle className="h-5 w-5 text-green-600 mr-2" />
+            <span className="font-medium text-green-800">Booking Accepted!</span>
+          </div>
+          <p className="text-sm text-green-700">
+            Customer has been notified and will complete payment. You'll receive confirmation once payment is done.
+          </p>
+        </div>
+      )}
+
+      {/* Payment Status for Providers */}
+      {isProvider && booking.payment_status && (
+        <div className={`rounded-lg p-3 mb-4 ${
+          booking.payment_status === 'paid' 
+            ? 'bg-green-50 border border-green-200' 
+            : 'bg-yellow-50 border border-yellow-200'
+        }`}>
+          <div className="flex items-center">
+            <div className={`p-2 rounded-full mr-3 ${
+              booking.payment_status === 'paid' ? 'bg-green-100' : 'bg-yellow-100'
+            }`}>
+              {booking.payment_status === 'paid' ? '💳' : '⏳'}
+            </div>
+            <div>
+              <p className={`font-medium ${
+                booking.payment_status === 'paid' ? 'text-green-800' : 'text-yellow-800'
+              }`}>
+                Payment {booking.payment_status === 'paid' ? 'Completed' : 'Pending'}
+              </p>
+              <p className={`text-sm ${
+                booking.payment_status === 'paid' ? 'text-green-700' : 'text-yellow-700'
+              }`}>
+                {booking.payment_status === 'paid' 
+                  ? 'Customer has paid. You can proceed with the service.'
+                  : 'Waiting for customer to complete payment.'
+                }
+              </p>
+            </div>
+          </div>
         </div>
       )}
 
