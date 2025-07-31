@@ -1,11 +1,12 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import CreateBooking from '../components/CreateBooking'
-import { Search, Star, MapPin, Clock, DollarSign, Navigation } from 'lucide-react'
+import { Search, Star, MapPin, Clock, DollarSign, Navigation,ArrowLeft  } from 'lucide-react'
 import toast from 'react-hot-toast'
+import Link from 'next/link'
 
 export default function ServicesPage() {
   const { user } = useAuth()
@@ -55,10 +56,13 @@ export default function ServicesPage() {
           setUserLocation({ latitude: 9.9312, longitude: 76.2673 }) // Kochi fallback
         }
       )
+    } else {
+      setUserLocation({ latitude: 9.9312, longitude: 76.2673 }) // Fallback for non-HTTPS or unsupported browsers
     }
   }
 
   const fetchServices = async () => {
+    setLoading(true)
     const { data, error } = await supabase
       .from('services')
       .select(`
@@ -74,13 +78,15 @@ export default function ServicesPage() {
 
     if (error) {
       toast.error('Error fetching services')
+      setLoading(false)
       return
     }
 
     const servicesWithFallback = data.map(service => ({
       ...service,
       average_rating: service.average_rating || (4.0 + Math.random()),
-      total_reviews: service.total_reviews || Math.floor(Math.random() * 50) + 5
+      total_reviews: service.total_reviews || Math.floor(Math.random() * 50) + 5,
+      profiles: service.profiles || { full_name: 'Unknown', city: 'Unknown', phone: '' }
     }))
 
     setServices(servicesWithFallback)
@@ -88,7 +94,7 @@ export default function ServicesPage() {
     setLoading(false)
   }
 
-  const calculateDistance = (lat, lon) => {
+  const calculateDistance = useCallback((lat, lon) => {
     if (!userLocation || !lat || !lon) return null
     const R = 6371
     const dLat = (lat - userLocation.latitude) * Math.PI / 180
@@ -100,9 +106,9 @@ export default function ServicesPage() {
       Math.sin(dLon / 2) ** 2
     const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
     return R * c
-  }
+  }, [userLocation])
 
-  const filterAndSortServices = () => {
+  const filterAndSortServices = useCallback(() => {
     let filtered = [...services]
 
     if (searchTerm) {
@@ -141,7 +147,7 @@ export default function ServicesPage() {
     })
 
     setFilteredServices(filtered)
-  }
+  }, [searchTerm, selectedCategory, sortBy, services, calculateDistance])
 
   const handleBookService = (service) => {
     if (!user) {
@@ -185,7 +191,7 @@ export default function ServicesPage() {
       <div className="text-xs space-y-2 mb-4">
         <div className="flex items-center text-white/70">
           <MapPin className="h-4 w-4 mr-2 text-teal-300" />
-          {service.profiles?.city || service.city}
+          {service.profiles?.city || service.city || 'Unknown'}
           {service.distance && <span className="ml-2 text-teal-300">• {service.distance.toFixed(1)} km</span>}
         </div>
         <div className="flex items-center">
@@ -240,10 +246,23 @@ export default function ServicesPage() {
       <div className="absolute inset-0 bg-black/40 z-0" />
       <div className="relative z-10 w-full backdrop-blur-lg bg-black/50 min-h-screen px-4 py-8">
         <div className="max-w-6xl mx-auto">
-          <h1 className="text-4xl font-bold text-white mb-2 animate-fadeInSlide">Find Trusted Services</h1>
-          <p className="text-white/70 mb-6 animate-fadeInSlide delay-200">
-            {userLocation ? "Top-rated professionals near you." : "Browse services by category."}
-          </p>
+          <div className="flex justify-between items-center mb-4">
+            <Link href="/">
+              <button
+                className="flex items-center px-3 py-1 text-sm rounded-lg bg-white/10 text-white/70 hover:bg-white/20 border border-white/20 transition animate-fadeInSlide delay-200"
+                aria-label="Go to Home"
+              >
+                <ArrowLeft className="h-4 w-4 mr-2" /> 
+                Back
+              </button>
+            </Link>
+            <div>
+              <h1 className="text-4xl font-bold text-white mb-2 animate-fadeInSlide">Find Trusted Services</h1>
+              <p className="text-white/70 mb-6 animate-fadeInSlide delay-200">
+                {userLocation ? "Top-rated professionals near you." : "Browse services by category."}
+              </p>
+            </div>
+          </div>
 
           <div className="relative mb-6 max-w-xl">
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-white/60" />
