@@ -108,10 +108,28 @@ export default function CreateService({ onClose, onServiceCreated }) {
         total_reviews: 0
       }
 
-      // Handle ARRAY fields properly
+      // Handle ARRAY fields properly with better parsing
       if (formData.availability_days?.trim()) {
-        // Convert string to array - split by comma or use as single item
-        const daysArray = formData.availability_days.trim().split(',').map(day => day.trim()).filter(day => day)
+        const daysInput = formData.availability_days.trim()
+        let daysArray = []
+        
+        // Handle different input formats
+        if (daysInput.toLowerCase().includes('mon-fri') || daysInput.toLowerCase().includes('weekdays')) {
+          daysArray = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday']
+        } else if (daysInput.toLowerCase().includes('weekend')) {
+          daysArray = ['Saturday', 'Sunday']
+        } else if (daysInput.toLowerCase().includes('daily') || daysInput.toLowerCase().includes('all days')) {
+          daysArray = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+        } else {
+          // Split by comma and clean up
+          daysArray = daysInput.split(',').map(day => day.trim()).filter(day => day)
+          
+          // If still just one item and no comma, make it an array
+          if (daysArray.length === 1 && !daysInput.includes(',')) {
+            daysArray = [daysInput]
+          }
+        }
+        
         serviceData.availability_days = daysArray
       }
       
@@ -120,8 +138,11 @@ export default function CreateService({ onClose, onServiceCreated }) {
       }
       
       if (formData.images?.trim()) {
-        // Convert string to array for images too
-        const imagesArray = formData.images.trim().split(',').map(img => img.trim()).filter(img => img)
+        const imagesInput = formData.images.trim()
+        // Only split if there are commas, otherwise single item array
+        const imagesArray = imagesInput.includes(',') 
+          ? imagesInput.split(',').map(img => img.trim()).filter(img => img)
+          : [imagesInput]
         serviceData.images = imagesArray
       }
 
@@ -307,7 +328,7 @@ export default function CreateService({ onClose, onServiceCreated }) {
                 type="text"
                 value={formData.availability_days}
                 onChange={(e) => setFormData({...formData, availability_days: e.target.value})}
-                placeholder="Monday,Tuesday,Wednesday (comma separated)"
+                placeholder="Mon-Fri, Weekends, Monday,Tuesday,Wednesday"
                 className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
             </div>
