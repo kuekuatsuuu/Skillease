@@ -1,12 +1,9 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useCallback } from 'react'
 import { useAuth } from '../context/AuthContext'
 import { supabase } from '../lib/supabase'
-import { getCurrentLocation, calculateDistance } from '../lib/locationUtils'
-import PaymentModal from './PaymentModal'
-import { Calendar, Clock, DollarSign, MessageSquare, User, MapPin, Navigation } from 'lucide-react'
-import toast from 'react-hot-toast'
+import { Calendar, Clock, MessageSquare, X } from 'lucide-react'
 
 export default function CreateBooking({ service, onClose, onBookingCreated }) {
   const { user } = useAuth()
@@ -17,312 +14,179 @@ export default function CreateBooking({ service, onClose, onBookingCreated }) {
     customer_notes: ''
   })
   const [loading, setLoading] = useState(false)
-  const [showPayment, setShowPayment] = useState(false)
-  const [createdBooking, setCreatedBooking] = useState(null)
-  const [customerLocation, setCustomerLocation] = useState(null)
-  const [gettingLocation, setGettingLocation] = useState(false)
 
-  const handleGetLocation = async () => {
-    try {
-      setGettingLocation(true)
-      toast.loading('Getting your location for the provider...')
-      
-      const location = await getCurrentLocation()
-      setCustomerLocation(location)
-      
-      toast.dismiss()
-      toast.success('Location captured! Provider will see the distance.')
-    } catch (error) {
-      console.error('Location error:', error)
-      toast.dismiss()
-      toast.error('Could not get location. Provider will contact you for address.')
-    } finally {
-      setGettingLocation(false)
-    }
-  }
+  const today = new Date().toISOString().split('T')[0]
+  const now = new Date()
+  const minDate = today
+  const minTime = formData.booking_date === minDate 
+    ? `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}` 
+    : '00:00'
 
-  const handleSubmit = async (e) => {
+  const handleSubmit = useCallback(async (e) => {
     e.preventDefault()
-    if (!user) return
+    if (!user?.id) {
+      alert('Please log in to create a booking.')
+      return
+    }
+
+    if (!service?.id || !service?.price_per_hour || !(service.provider_id || service.profiles?.id)) {
+      console.error('Invalid service object:', service)
+      alert('Invalid service data. Please try again.')
+      return
+    }
+
+    const selectedDateTime = new Date(`${formData.booking_date}T${formData.booking_time}`)
+    if (selectedDateTime < now) {
+      alert('Cannot book a time in the past.')
+      return
+    }
 
     setLoading(true)
-
     try {
       const totalPrice = service.price_per_hour * formData.duration_hours
-      
-      // Calculate distance if both locations are available
-      let distance = null
-      if (customerLocation && service.latitude && service.longitude) {
-        distance = calculateDistance(
-          customerLocation.latitude,
-          customerLocation.longitude,
-          service.latitude,
-          service.longitude
-        )
-      }
-
-      const bookingData = {
-        service_id: service.id,
-        customer_id: user.id,
-        provider_id: service.provider_id,
-        booking_date: formData.booking_date,
-        booking_time: formData.booking_time,
-        duration_hours: formData.duration_hours,
-        total_price: totalPrice,
-        customer_notes: formData.customer_notes,
-        status: 'pending',
-        payment_status: 'pending'
-      }
-
-      // Add customer location if available
-      if (customerLocation) {
-        bookingData.customer_current_lat = customerLocation.latitude
-        bookingData.customer_current_lng = customerLocation.longitude
-        if (distance) {
-          bookingData.distance_km = distance
-        }
-      }
+      const providerId = service.provider_id || service.profiles.id
 
       const { data, error } = await supabase
         .from('bookings')
-        .insert([bookingData])
-        .select(`
-          *,
-          services!bookings_service_id_fkey (
-            title,
-            category,
-            price_per_hour
-          )
-        `)
+        .insert([
+          {
+            service_id: service.id,
+            customer_id: user.id,
+            provider_id: providerId,
+            booking_date: formData.booking_date,
+            booking_time: formData.booking_time,
+            duration_hours: formData.duration_hours,
+            total_price: totalPrice,
+            customer_notes: formData.customer_notes,
+            status: 'pending'
+          }
+        ])
+        .select()
 
-      if (error) throw error
+      if (error) {
+        console.error('Supabase error:', error)
+        throw new Error(error.message)
+      }
+      if (!data || !data[0]) {
+        throw new Error('No booking data returned from server.')
+      }
 
-      const booking = data[0]
-      setCreatedBooking(booking)
-      
-      // Send notification to provider
-      await sendProviderNotification(booking, distance)
-      
-      // Show payment modal
-      setShowPayment(true)
-      
-      toast.success('Booking request sent to provider!')
+      onBookingCreated(data[0])
+      onClose()
     } catch (error) {
-      console.error('Failed to create booking:', error)
-      toast.error('Failed to create booking. Please try again.')
+      console.error('Failed to create booking:', error.message)
+      alert(`Failed to create booking: ${error.message}. Please try again.`)
     } finally {
       setLoading(false)
     }
-  }
-
-  const sendProviderNotification = async (booking, distance) => {
-    try {
-      // In a real app, you'd use a notification service like Firebase, Pusher, or WebSockets
-      // For now, we'll just log and could use email/SMS services
-      
-      console.log('Notification sent to provider:', {
-        providerId: booking.provider_id,
-        bookingId: booking.id,
-        customerDistance: distance ? `${distance.toFixed(1)}km` : 'Location not provided',
-        message: `New booking request for ${booking.services.title}`,
-        customerLocation: customerLocation
-      })
-
-      // You could integrate with services like:
-      // - Twilio for SMS
-      // - SendGrid for email
-      // - Firebase FCM for push notifications
-      // - WebSocket for real-time notifications
-      
-    } catch (error) {
-      console.error('Failed to send notification:', error)
-    }
-  }
-
-  const handlePaymentSuccess = (bookingId) => {
-    toast.success('Payment successful! Booking confirmed.')
-    onBookingCreated(createdBooking)
-    onClose()
-  }
-
-  const today = new Date().toISOString().split('T')[0]
-
-  if (showPayment && createdBooking) {
-    return (
-      <PaymentModal
-        booking={createdBooking}
-        onClose={() => {
-          setShowPayment(false)
-          onClose()
-        }}
-        onPaymentSuccess={handlePaymentSuccess}
-      />
-    )
-  }
+  }, [user, service, formData, onBookingCreated, onClose])
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-      <div className="bg-white rounded-2xl p-8 max-w-md w-full max-h-[90vh] overflow-y-auto">
-        <div className="flex items-center justify-between mb-6">
-          <h2 className="text-2xl font-bold text-gray-900">Book Service</h2>
+    
+      <div className="relative bg-white/10 border border-white/20 backdrop-blur-md rounded-2xl shadow-2xl w-full max-w-md p-6 text-white max-h-[90vh] overflow-y-auto">
+        <div className="flex justify-between items-center mb-4">
+          <h2 id="booking-modal-title" className="text-2xl font-semibold">Book Service</h2>
           <button
             onClick={onClose}
-            className="text-gray-400 hover:text-gray-600 text-2xl"
+            aria-label="Close modal"
+            className="text-xl text-white hover:text-red-400"
           >
-            ×
+            <X />
           </button>
         </div>
 
-        {/* Service Info */}
-        <div className="bg-gradient-to-r from-blue-50 to-purple-50 rounded-xl p-4 mb-6">
-          <h3 className="font-bold text-gray-900">{service.title}</h3>
-          <p className="text-gray-600 capitalize">{service.category}</p>
-          <div className="flex items-center justify-between mt-2">
-            <p className="text-green-600 font-semibold">₹{service.price_per_hour}/hour</p>
-            <p className="text-sm text-gray-500">by {service.profiles?.full_name}</p>
-          </div>
+        <div className="bg-white/10 border border-white/10 rounded-xl p-4 mb-6 backdrop-blur-sm">
+          <h3 className="font-bold text-white">{service?.title || 'Service'}</h3>
+          <p className="text-gray-200 capitalize">{service?.category || 'Category'}</p>
+          <p className="text-green-400 font-semibold mt-2">₹{service?.price_per_hour || 0}/hour</p>
         </div>
 
-        {/* Location Section */}
-        <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-4 mb-6">
-          <div className="flex items-center justify-between mb-3">
-            <h4 className="font-semibold text-gray-900 flex items-center">
-              <MapPin className="h-5 w-5 mr-2 text-blue-600" />
-              Your Location
-            </h4>
-            <button
-              onClick={handleGetLocation}
-              disabled={gettingLocation || customerLocation}
-              className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded-lg text-sm font-medium transition-colors disabled:opacity-50 flex items-center"
-            >
-              {gettingLocation ? (
-                '⏳ Getting...'
-              ) : customerLocation ? (
-                '✅ Captured'
-              ) : (
-                <>
-                  <Navigation className="h-4 w-4 mr-1" />
-                  Get Location
-                </>
-              )}
-            </button>
-          </div>
-          
-          {customerLocation ? (
-            <div className="text-sm">
-              <p className="text-green-700 font-medium">✓ Location shared with provider</p>
-              <p className="text-gray-600">They'll see exact distance and can navigate to you</p>
-              {service.latitude && service.longitude && (
-                <p className="text-blue-600 mt-1">
-                  Distance: {calculateDistance(
-                    customerLocation.latitude,
-                    customerLocation.longitude,
-                    service.latitude,
-                    service.longitude
-                  ).toFixed(1)}km from provider
-                </p>
-              )}
-            </div>
-          ) : (
-            <p className="text-sm text-yellow-700">
-              📍 Share your location so the provider knows the distance and can reach you easily
-            </p>
-          )}
-        </div>
-
-        <form onSubmit={handleSubmit} className="space-y-6">
+        <form onSubmit={handleSubmit} className="space-y-5">
           <div>
-            <label className="flex items-center text-sm font-medium text-gray-700 mb-2">
-              <Calendar className="h-4 w-4 mr-2" />
+            <label htmlFor="booking-date" className="flex items-center gap-2 text-sm font-medium mb-1">
+              <Calendar className="w-4 h-4" />
               Preferred Date
             </label>
             <input
+              id="booking-date"
               type="date"
               required
-              min={today}
+              min={minDate}
               value={formData.booking_date}
-              onChange={(e) => setFormData({...formData, booking_date: e.target.value})}
-              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              onChange={(e) => setFormData({ ...formData, booking_date: e.target.value })}
+              className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 backdrop-blur-md text-white placeholder-gray-300 focus:outline-none focus:ring-2 focus:ring-purple-500"
             />
           </div>
 
           <div>
-            <label className="flex items-center text-sm font-medium text-gray-700 mb-2">
-              <Clock className="h-4 w-4 mr-2" />
+            <label htmlFor="booking-time" className="flex items-center gap-2 text-sm font-medium mb-1">
+              <Clock className="w-4 h-4" />
               Preferred Time
             </label>
             <input
+              id="booking-time"
               type="time"
               required
+              min={formData.booking_date === minDate ? minTime : undefined}
               value={formData.booking_time}
-              onChange={(e) => setFormData({...formData, booking_time: e.target.value})}
-              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              onChange={(e) => setFormData({ ...formData, booking_time: e.target.value })}
+              className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 backdrop-blur-md text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
             />
           </div>
 
           <div>
-            <label className="flex items-center text-sm font-medium text-gray-700 mb-2">
-              <Clock className="h-4 w-4 mr-2" />
+            <label htmlFor="duration-hours" className="flex items-center gap-2 text-sm font-medium mb-1">
+              <Clock className="w-4 h-4" />
               Duration (hours)
             </label>
             <select
+              id="duration-hours"
               value={formData.duration_hours}
-              onChange={(e) => setFormData({...formData, duration_hours: parseInt(e.target.value)})}
-              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              onChange={(e) => setFormData({ ...formData, duration_hours: parseInt(e.target.value) })}
+              className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 backdrop-blur-md text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
             >
-              {[1,2,3,4,5,6,7,8].map(hour => (
+              {[1, 2, 3, 4, 5, 6, 7, 8].map(hour => (
                 <option key={hour} value={hour}>{hour} hour{hour > 1 ? 's' : ''}</option>
               ))}
             </select>
           </div>
 
           <div>
-            <label className="flex items-center text-sm font-medium text-gray-700 mb-2">
-              <MessageSquare className="h-4 w-4 mr-2" />
-              Additional Notes (Optional)
+            <label htmlFor="customer-notes" className="flex items-center gap-2 text-sm font-medium mb-1">
+              <MessageSquare className="w-4 h-4" />
+              Notes (Optional)
             </label>
             <textarea
-              value={formData.customer_notes}
-              onChange={(e) => setFormData({...formData, customer_notes: e.target.value})}
-              placeholder="Any specific requirements or instructions..."
+              id="customer-notes"
               rows={3}
-              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              value={formData.customer_notes}
+              onChange={(e) => setFormData({ ...formData, customer_notes: e.target.value })}
+              className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 backdrop-blur-md text-white placeholder-gray-300 focus:outline-none focus:ring-2 focus:ring-purple-500"
+              placeholder="Any specific instructions..."
             />
           </div>
 
-          {/* Price Summary */}
-          <div className="bg-gray-50 rounded-lg p-4">
+          <div className="bg-white/5 border border-white/10 rounded-xl p-4 mt-2">
             <div className="flex justify-between items-center">
-              <span className="text-gray-600">Total Price:</span>
-              <span className="text-2xl font-bold text-green-600">
-                ₹{(service.price_per_hour * formData.duration_hours).toLocaleString()}
+              <span>Total Price</span>
+              <span className="text-lg font-semibold text-green-400">
+                ₹{(service?.price_per_hour * formData.duration_hours || 0).toLocaleString()}
               </span>
             </div>
-            <p className="text-sm text-gray-500 mt-1">
-              ₹{service.price_per_hour}/hour × {formData.duration_hours} hour{formData.duration_hours > 1 ? 's' : ''}
+            <p className="text-xs text-gray-300 mt-1">
+              ₹{service?.price_per_hour || 0}/hour × {formData.duration_hours} hour{formData.duration_hours > 1 ? 's' : ''}
             </p>
-          </div>
-
-          {/* Info Box */}
-          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-            <h4 className="font-medium text-blue-900 mb-2">📋 What happens next?</h4>
-            <ol className="text-sm text-blue-700 space-y-1">
-              <li>1. Provider gets notified with your location & distance</li>
-              <li>2. They can accept/decline based on availability</li>
-              <li>3. If accepted, you'll proceed to secure payment</li>
-              <li>4. Service confirmation & provider contact details</li>
-            </ol>
           </div>
 
           <button
             type="submit"
             disabled={loading}
-            className="w-full bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white px-6 py-4 rounded-xl font-medium transition-all duration-300 disabled:opacity-50"
+            className="w-full mt-4 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white py-3 rounded-xl font-semibold transition-all disabled:opacity-50"
           >
-            {loading ? 'Sending Request...' : 'Send Booking Request'}
+            {loading ? 'Creating Booking...' : 'Book Now'}
           </button>
         </form>
       </div>
-    </div>
+    
   )
 }
