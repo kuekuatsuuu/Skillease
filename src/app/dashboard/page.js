@@ -1,5 +1,4 @@
 "use client";
-
 import { useState, useEffect } from "react";
 import { useAuth } from "../context/AuthContext";
 import { supabase } from "../lib/supabase";
@@ -10,28 +9,18 @@ import Link from "next/link";
 import {
   Calendar,
   Star,
-  Users,
   TrendingUp,
   Clock,
-  DollarSign,
-  Settings,
-  Bell,
-  Plus,
-  LogOut,
-  User,
-  Home,
-  Search,
-  Activity,
   Award,
-  MessageSquare,
   CheckCircle,
   XCircle,
-  MapPin,
+  Search,
+  MessageSquare,
 } from "lucide-react";
 import toast from "react-hot-toast";
 
 export default function Dashboard() {
-  const { user, signOut } = useAuth();
+  const { user, signOut, handleAuthFetchError } = useAuth();
   const router = useRouter();
   const [userName, setUserName] = useState("");
   const [userType, setUserType] = useState("customer");
@@ -55,38 +44,31 @@ export default function Dashboard() {
       setUserType(user.user_metadata?.user_type || "customer");
       fetchUserData();
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user]);
+
+  useEffect(() => {
+    console.log("[Dashboard] user:", user);
+    console.log("[Dashboard] loading:", loading);
+  }, [user, loading]);
 
   const fetchUserData = async () => {
     if (!user) return;
-
     try {
-      // Fetch bookings
+      console.log("[Dashboard] Fetching user bookings and stats...");
       const { data: bookingsData, error: bookingsError } = await supabase
         .from("bookings")
         .select(
-          `
-          *,
-          services!bookings_service_id_fkey (
-            title,
-            category,
-            price_per_hour
-          ),
-          profiles!bookings_provider_id_fkey (
-            full_name,
-            phone
-          )
-        `
+          `*,services!bookings_service_id_fkey(title,category,price_per_hour),profiles!bookings_provider_id_fkey(full_name,phone)`
         )
         .eq("customer_id", user.id)
         .order("created_at", { ascending: false });
-
-      if (bookingsError) throw bookingsError;
-
+      console.log("[Dashboard] Bookings data:", bookingsData);
+      if (bookingsError) {
+        console.error("[Dashboard] Bookings error:", bookingsError);
+        await handleAuthFetchError?.(bookingsError);
+        throw bookingsError;
+      }
       setBookings(bookingsData || []);
-
-      // Calculate stats
       const stats = {
         totalBookings: bookingsData?.length || 0,
         pendingBookings:
@@ -98,18 +80,19 @@ export default function Dashboard() {
             (sum, b) => sum + (parseFloat(b.total_price) || 0),
             0
           ) || 0,
-        reviewsGiven: 0, // Will be calculated from reviews
+        reviewsGiven: 0,
       };
-
-      // Fetch review count
-      const { data: reviewsData } = await supabase
+      const { data: reviewsData, error: reviewsError } = await supabase
         .from("reviews")
         .select("id")
         .eq("customer_id", user.id);
-
+      if (reviewsError) {
+        console.error("[Dashboard] Reviews error:", reviewsError);
+        await handleAuthFetchError?.(reviewsError);
+      }
       stats.reviewsGiven = reviewsData?.length || 0;
-
       setStats(stats);
+      console.log("[Dashboard] Stats:", stats);
     } catch (error) {
       console.error("Error fetching user data:", error);
       toast.error("Failed to load dashboard data");
@@ -133,7 +116,7 @@ export default function Dashboard() {
   };
 
   const handleReviewSubmitted = () => {
-    fetchUserData(); // Refresh data
+    fetchUserData();
     setShowReviewModal(false);
     setSelectedBooking(null);
   };
@@ -183,7 +166,6 @@ export default function Dashboard() {
 
   const isProvider = userType === "provider";
 
-  // Inserted dev branch UI, using logic and state from above
   return (
     <ProtectedRoute>
       <div
@@ -207,7 +189,9 @@ export default function Dashboard() {
                     <Link
                       href="/services"
                       className="transition-colors text-lg flex items-center animate-fadeInSlide delay-200 text-gray-600 hover:text-teal-600"
-                    ></Link>
+                    >
+                      Services
+                    </Link>
                     {isProvider && (
                       <Link
                         href="/provider-dashboard"
@@ -220,72 +204,28 @@ export default function Dashboard() {
                   </div>
                 </div>
                 <div className="flex items-center space-x-6">
-                  <button className="transition-colors animate-fadeInSlide delay-200 text-gray-600 hover:text-teal-600"></button>
-                  <button className="transition-colors animate-fadeInSlide delay-200 text-gray-600 hover:text-teal-600"></button>
+                  <button
+                    onClick={handleLogout}
+                    className="transition-colors animate-fadeInSlide delay-200 text-gray-600 hover:text-teal-600"
+                  >
+                    Logout
+                  </button>
                   <div className="flex items-center space-x-4">
                     <div className="text-right">
                       <div className="text-base font-semibold text-gray-900">
                         {userName}
                       </div>
-                      <div className="text-sm capitalize flex items-center text-gray-600">
-                        <User className="h-4 w-4 mr-1 text-gray-500" />
-                        {userType}
-                      </div>
                     </div>
-                    <button
-                      onClick={handleLogout}
-                      className="px-4 py-3 rounded-lg font-semibold transition-colors hover:scale-105 flex items-center animate-fadeInSlide delay-200 bg-white/30 border-white/40 text-gray-900 hover:bg-white/40 backdrop-blur-md border"
-                    >
-                      <LogOut className="h-5 w-5 mr-2 text-gray-500" />
-                      Logout
-                    </button>
                   </div>
                 </div>
               </div>
             </div>
           </nav>
-          <main className="max-w-7xl mx-auto py-10 px-6 sm:px-8 lg:px-10">
-            <div className="mb-10">
-              <div className="rounded-2xl p-10 border shadow-2xl animate-slideUp bg-white/20 border-white/30 backdrop-blur-3xl text-gray-900">
-                <h1 className="text-5xl font-bold mb-6 animate-fadeInSlide">
-                  🎉 Welcome, {userName}!
-                </h1>
-                <p className="text-xl mb-8 animate-fadeInSlide delay-200 text-gray-600">
-                  {isProvider
-                    ? "🏢 Ready to manage your services and connect with customers!"
-                    : "🔍 Discover amazing local services in your area!"}
-                </p>
-                <div className="flex flex-wrap gap-5">
-                  <Link
-                    href="/services"
-                    className="px-8 py-4 rounded-lg font-semibold text-lg transition-all duration-300 hover:scale-105 animate-fadeInSlide delay-200 bg-gradient-to-r from-teal-500 to-cyan-600 hover:from-teal-600 hover:to-cyan-700 text-white"
-                  >
-                    <span className="flex items-center">
-                      <Plus className="h-6 w-6 mr-2 text-white/60" />
-                      {isProvider ? "Add New Service" : "Book New Service"}
-                    </span>
-                  </Link>
-                  {isProvider && (
-                    <Link
-                      href="/provider-dashboard"
-                      className="px-8 py-4 rounded-lg font-semibold text-lg transition-all duration-300 hover:scale-105 animate-fadeInSlide delay-200 bg-gradient-to-r from-teal-500 to-cyan-600 hover:from-teal-600 hover:to-cyan-700 text-white"
-                    >
-                      <span className="flex items-center">
-                        <TrendingUp className="h-6 w-6 mr-2 text-white/60" />
-                        Provider Dashboard
-                      </span>
-                    </Link>
-                  )}
-                </div>
-              </div>
-            </div>
-            {/* Stats Grid */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6 mb-8">
+          <main className="max-w-5xl mx-auto py-10 px-4">
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-10">
               <div className="bg-white rounded-2xl p-6 shadow-md border border-gray-100 hover:shadow-lg transition-shadow">
                 <div className="flex items-center">
-                  <div className="bg-blue-100 p-4 rounded-xl">
-                    <Calendar className="h-8 w-8 text-blue-600" />
-                  </div>
+                  <Calendar className="h-8 w-8 text-blue-600" />
                   <div className="ml-4">
                     <p className="text-sm font-medium text-gray-600">
                       Total Bookings
@@ -298,9 +238,7 @@ export default function Dashboard() {
               </div>
               <div className="bg-white rounded-2xl p-6 shadow-md border border-gray-100 hover:shadow-lg transition-shadow">
                 <div className="flex items-center">
-                  <div className="bg-yellow-100 p-4 rounded-xl">
-                    <Clock className="h-8 w-8 text-yellow-600" />
-                  </div>
+                  <Clock className="h-8 w-8 text-yellow-600" />
                   <div className="ml-4">
                     <p className="text-sm font-medium text-gray-600">Pending</p>
                     <p className="text-3xl font-bold text-gray-900">
@@ -311,9 +249,7 @@ export default function Dashboard() {
               </div>
               <div className="bg-white rounded-2xl p-6 shadow-md border border-gray-100 hover:shadow-lg transition-shadow">
                 <div className="flex items-center">
-                  <div className="bg-green-100 p-4 rounded-xl">
-                    <CheckCircle className="h-8 w-8 text-green-600" />
-                  </div>
+                  <CheckCircle className="h-8 w-8 text-green-600" />
                   <div className="ml-4">
                     <p className="text-sm font-medium text-gray-600">
                       Completed
@@ -326,24 +262,7 @@ export default function Dashboard() {
               </div>
               <div className="bg-white rounded-2xl p-6 shadow-md border border-gray-100 hover:shadow-lg transition-shadow">
                 <div className="flex items-center">
-                  <div className="bg-purple-100 p-4 rounded-xl">
-                    <DollarSign className="h-8 w-8 text-purple-600" />
-                  </div>
-                  <div className="ml-4">
-                    <p className="text-sm font-medium text-gray-600">
-                      Total Spent
-                    </p>
-                    <p className="text-3xl font-bold text-gray-900">
-                      ₹{stats.totalSpent.toLocaleString()}
-                    </p>
-                  </div>
-                </div>
-              </div>
-              <div className="bg-white rounded-2xl p-6 shadow-md border border-gray-100 hover:shadow-lg transition-shadow">
-                <div className="flex items-center">
-                  <div className="bg-pink-100 p-4 rounded-xl">
-                    <Star className="h-8 w-8 text-pink-600" />
-                  </div>
+                  <Award className="h-8 w-8 text-purple-600" />
                   <div className="ml-4">
                     <p className="text-sm font-medium text-gray-600">
                       Reviews Given
@@ -355,72 +274,71 @@ export default function Dashboard() {
                 </div>
               </div>
             </div>
-            {/* Recent Bookings */}
-            <div className="bg-white rounded-2xl shadow-md border border-gray-100 p-6 mb-8">
-              <div className="flex items-center justify-between mb-6">
-                <h2 className="text-xl font-bold text-gray-900 flex items-center">
-                  <Activity className="h-6 w-6 mr-2 text-blue-600" />
-                  Recent Bookings
-                </h2>
-                <Link
-                  href="/services"
-                  className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium transition-colors flex items-center text-sm"
-                >
-                  <Plus className="h-4 w-4 mr-1" />
-                  Book Service
-                </Link>
-              </div>
+            <div className="bg-white rounded-2xl p-8 shadow-md border border-gray-100 hover:shadow-lg transition-shadow">
+              <h2 className="text-2xl font-bold text-gray-900 mb-6">
+                Your Bookings
+              </h2>
               {bookings.length > 0 ? (
-                <div className="space-y-4">
+                <div className="space-y-6">
                   {bookings.slice(0, 5).map((booking) => (
                     <div
                       key={booking.id}
-                      className="border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow"
+                      className="border-b last:border-b-0 pb-6 mb-6 last:mb-0"
                     >
-                      <div className="flex items-center justify-between mb-3">
-                        <div>
-                          <h3 className="font-semibold text-gray-900">
-                            {booking.services?.title}
-                          </h3>
-                          <p className="text-gray-600 text-sm capitalize">
-                            {booking.services?.category}
-                          </p>
-                        </div>
-                        <div
-                          className={`px-3 py-1 rounded-full text-sm font-medium flex items-center ${getStatusColor(
-                            booking.status
-                          )}`}
-                        >
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="flex items-center space-x-2">
                           {getStatusIcon(booking.status)}
-                          <span className="ml-1 capitalize">
+                          <span
+                            className={`px-2 py-1 rounded-lg text-xs font-semibold ${getStatusColor(
+                              booking.status
+                            )}`}
+                          >
                             {booking.status}
                           </span>
                         </div>
+                        <div className="text-sm text-gray-500">
+                          {new Date(booking.created_at).toLocaleString()}
+                        </div>
                       </div>
-                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                      <div className="flex flex-col md:flex-row md:items-center md:justify-between">
                         <div>
-                          <p className="text-gray-500">Date</p>
-                          <p className="font-medium">
-                            {new Date(
-                              booking.booking_date
-                            ).toLocaleDateString()}
-                          </p>
+                          <div className="font-semibold text-lg text-gray-900">
+                            {booking.services?.title}
+                          </div>
+                          <div className="text-gray-500 text-sm">
+                            {booking.services?.category}
+                          </div>
+                          <div className="text-gray-500 text-sm">
+                            Provider: {booking.profiles?.full_name}
+                          </div>
                         </div>
-                        <div>
-                          <p className="text-gray-500">Time</p>
-                          <p className="font-medium">{booking.booking_time}</p>
-                        </div>
-                        <div>
-                          <p className="text-gray-500">Duration</p>
-                          <p className="font-medium">
-                            {booking.duration_hours}h
-                          </p>
-                        </div>
-                        <div>
-                          <p className="text-gray-500">Price</p>
-                          <p className="font-medium text-green-600">
-                            ₹{booking.total_price}
-                          </p>
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm mt-4 md:mt-0">
+                          <div>
+                            <p className="text-gray-500">Date</p>
+                            <p className="font-medium">
+                              {new Date(
+                                booking.booking_date
+                              ).toLocaleDateString()}
+                            </p>
+                          </div>
+                          <div>
+                            <p className="text-gray-500">Time</p>
+                            <p className="font-medium">
+                              {booking.booking_time}
+                            </p>
+                          </div>
+                          <div>
+                            <p className="text-gray-500">Duration</p>
+                            <p className="font-medium">
+                              {booking.duration_hours}h
+                            </p>
+                          </div>
+                          <div>
+                            <p className="text-gray-500">Price</p>
+                            <p className="font-medium text-green-600">
+                              ₹{booking.total_price}
+                            </p>
+                          </div>
                         </div>
                       </div>
                       {booking.status === "completed" && (
@@ -475,18 +393,18 @@ export default function Dashboard() {
                 </div>
               )}
             </div>
+            {/* Review Modal */}
+            {showReviewModal && selectedBooking && (
+              <ReviewModal
+                booking={selectedBooking}
+                onClose={() => {
+                  setShowReviewModal(false);
+                  setSelectedBooking(null);
+                }}
+                onReviewSubmitted={handleReviewSubmitted}
+              />
+            )}
           </main>
-          {/* Review Modal */}
-          {showReviewModal && selectedBooking && (
-            <ReviewModal
-              booking={selectedBooking}
-              onClose={() => {
-                setShowReviewModal(false);
-                setSelectedBooking(null);
-              }}
-              onReviewSubmitted={handleReviewSubmitted}
-            />
-          )}
         </div>
       </div>
     </ProtectedRoute>
