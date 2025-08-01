@@ -122,7 +122,7 @@ export default function CreateBooking({ service, onClose, onBookingCreated }) {
     return null;
   }
 
-  // ...existing UI code (do not change UI)...
+
   return (
     <div className="relative bg-white/10 border border-white/20 backdrop-blur-md rounded-2xl shadow-2xl w-full max-w-md p-6 text-white max-h-[90vh] overflow-y-auto">
       <div className="flex justify-between items-center mb-4">

@@ -6,8 +6,8 @@ import { Toaster } from 'react-hot-toast'
 const inter = Inter({ subsets: ['latin'] })
 
 export const metadata = {
-  title: 'Hackathon Project - Team Victory',
-  description: 'Built for winning hackathons and securing dream jobs',
+  title: 'Skillease',
+  description: 'Connect with trusted local service providers. From electricians to tutors, find the perfect professional with real-time location tracking.',
 }
 
 export default function RootLayout({ children }) {
