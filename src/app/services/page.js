@@ -1,224 +1,202 @@
-"use client";
+'use client'
 
-import { useState, useEffect } from "react";
-import { supabase } from "../lib/supabase";
-import { useAuth } from "../context/AuthContext";
-import CreateBooking from "../components/CreateBooking";
-import {
-  Search,
-  Star,
-  MapPin,
-  Clock,
-  DollarSign,
-  Navigation,
-} from "lucide-react";
-import toast from "react-hot-toast";
+import { useState, useEffect } from 'react'
+import { useAuth } from '../context/AuthContext'
+import { supabase } from '../lib/supabase'
+import { getCurrentLocation, calculateDistance } from '../lib/locationUtils'
+import CreateBooking from '../components/CreateBooking'
+import { Search, Star, MapPin, Clock, DollarSign, Navigation } from 'lucide-react'
+import toast from 'react-hot-toast'
 
 export default function ServicesPage() {
-  const { user } = useAuth();
-  const [services, setServices] = useState([]);
-  const [filteredServices, setFilteredServices] = useState([]);
-  const [searchTerm, setSearchTerm] = useState("");
-  const [selectedCategory, setSelectedCategory] = useState("all");
-  const [sortBy, setSortBy] = useState("rating");
-  const [userLocation, setUserLocation] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [selectedService, setSelectedService] = useState(null);
-  const [showBookingModal, setShowBookingModal] = useState(false);
-  const [isMounted, setIsMounted] = useState(false);
+  const { user } = useAuth()
+  const [services, setServices] = useState([])
+  const [filteredServices, setFilteredServices] = useState([])
+  const [searchTerm, setSearchTerm] = useState('')
+  const [selectedCategory, setSelectedCategory] = useState('all')
+  const [sortBy, setSortBy] = useState('rating')
+  const [userLocation, setUserLocation] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [selectedService, setSelectedService] = useState(null)
+  const [showBookingModal, setShowBookingModal] = useState(false)
+  const [isMounted, setIsMounted] = useState(false)
 
   const categories = [
-    "all",
-    "electrician",
-    "plumber",
-    "tutor",
-    "cleaner",
-    "fitness trainer",
-    "photographer",
-    "gardener",
-    "painter",
-  ];
+    'all', 'electrician', 'plumber', 'tutor', 'cleaner', 
+    'fitness trainer', 'photographer', 'gardener', 'painter', 'carpenter', 'mechanic'
+  ]
 
   useEffect(() => {
-    setIsMounted(true);
-  }, []);
+    setIsMounted(true)
+  }, [])
 
   useEffect(() => {
     if (isMounted) {
-      fetchUserLocationAndServices();
+      getUserLocation()
+      fetchServices()
     }
-  }, [isMounted]);
+  }, [isMounted])
 
   useEffect(() => {
     if (isMounted) {
-      filterAndSortServices();
+      filterAndSortServices()
     }
-  }, [searchTerm, selectedCategory, sortBy, services, userLocation, isMounted]);
+  }, [searchTerm, selectedCategory, sortBy, services, userLocation, isMounted])
 
-  // Fetch user profile for lat/lng, fallback to Kochi if not logged in
-  const fetchUserLocationAndServices = async () => {
-    let location = { latitude: 9.9312, longitude: 76.2673 }; // Kochi fallback
-    if (user && user.id) {
-      const { data: profile, error } = await supabase
-        .from("profiles")
-        .select("latitude, longitude")
-        .eq("id", user.id)
-        .single();
-      if (profile && profile.latitude && profile.longitude) {
-        location = { latitude: profile.latitude, longitude: profile.longitude };
-      }
+  const getUserLocation = async () => {
+    try {
+      const location = await getCurrentLocation()
+      setUserLocation(location)
+    } catch (error) {
+      console.log('Could not get user location:', error)
+      setUserLocation({ latitude: 9.9312, longitude: 76.2673 }) // Kochi fallback
     }
-    setUserLocation(location);
-    fetchServices(location);
-  };
+  }
 
-  const fetchServices = async (location) => {
-    const { data, error } = await supabase
-      .from("services")
-      .select(
-        `
-        *,
-        profiles!services_provider_id_fkey (
-          full_name,
-          city,
-          phone
-        )
-      `
-      )
-      .eq("is_active", true)
-      .order("average_rating", { ascending: false });
+  const fetchServices = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('services')
+        .select(`
+          *,
+          profiles!services_provider_id_fkey (
+            full_name,
+            phone,
+            city
+          )
+        `)
+        .eq('is_active', true)
+        .order('created_at', { ascending: false })
 
-    if (error) {
-      toast.error("Error fetching services");
-      setLoading(false);
-      return;
+      if (error) throw error
+
+      const servicesWithDistance = data.map(service => {
+        if (userLocation && service.latitude && service.longitude) {
+          const distance = calculateDistance(
+            userLocation.latitude,
+            userLocation.longitude,
+            service.latitude,
+            service.longitude
+          )
+          return { 
+            ...service, 
+            distance,
+            average_rating: typeof service.average_rating === 'number' ? service.average_rating : 0,
+            total_reviews: typeof service.total_reviews === 'number' ? service.total_reviews : 0
+          }
+        }
+        return { 
+          ...service, 
+          distance: null,
+          average_rating: typeof service.average_rating === 'number' ? service.average_rating : 0,
+          total_reviews: typeof service.total_reviews === 'number' ? service.total_reviews : 0
+        }
+      })
+
+      setServices(servicesWithDistance)
+      setFilteredServices(servicesWithDistance)
+    } catch (error) {
+      console.error('Error fetching services:', error)
+      toast.error('Failed to load services')
+    } finally {
+      setLoading(false)
     }
+  }
 
-    // Use real average_rating, total_reviews, latitude, longitude
-    const servicesWithData = data.map((service) => ({
-      ...service,
-      average_rating:
-        typeof service.average_rating === "number" ? service.average_rating : 0,
-      total_reviews:
-        typeof service.total_reviews === "number" ? service.total_reviews : 0,
-      distance:
-        location && service.latitude && service.longitude
-          ? calculateDistance(
-              service.latitude,
-              service.longitude,
-              location.latitude,
-              location.longitude
-            )
-          : null,
-    }));
-
-    setServices(servicesWithData);
-    setFilteredServices(servicesWithData);
-    setLoading(false);
-  };
-
-  // Haversine formula: distance in km between two lat/lng
   const calculateDistance = (lat1, lon1, lat2, lon2) => {
-    if (!lat1 || !lon1 || !lat2 || !lon2) return null;
-    const R = 6371;
-    const dLat = ((lat2 - lat1) * Math.PI) / 180;
-    const dLon = ((lon2 - lon1) * Math.PI) / 180;
+    if (!lat1 || !lon1 || !lat2 || !lon2) return null
+    const R = 6371
+    const dLat = ((lat2 - lat1) * Math.PI) / 180
+    const dLon = ((lon2 - lon1) * Math.PI) / 180
     const a =
       Math.sin(dLat / 2) ** 2 +
       Math.cos((lat1 * Math.PI) / 180) *
         Math.cos((lat2 * Math.PI) / 180) *
-        Math.sin(dLon / 2) ** 2;
-    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-    return R * c;
-  };
+        Math.sin(dLon / 2) ** 2
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+    return R * c
+  }
 
   const filterAndSortServices = () => {
-    let filtered = [...services];
+    let filtered = [...services]
 
     if (searchTerm) {
-      filtered = filtered.filter(
-        (service) =>
-          service.title?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-          service.description
-            ?.toLowerCase()
-            .includes(searchTerm.toLowerCase()) ||
-          service.category?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-          service.profiles?.full_name
-            ?.toLowerCase()
-            .includes(searchTerm.toLowerCase())
-      );
+      filtered = filtered.filter(service =>
+        service.title?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        service.description?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        service.category?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        service.profiles?.full_name?.toLowerCase().includes(searchTerm.toLowerCase())
+      )
     }
 
-    if (selectedCategory !== "all") {
-      filtered = filtered.filter(
-        (service) =>
-          service.category?.toLowerCase() === selectedCategory.toLowerCase()
-      );
+    if (selectedCategory !== 'all') {
+      filtered = filtered.filter(service =>
+        service.category?.toLowerCase() === selectedCategory.toLowerCase()
+      )
     }
-
-    // No need to recalculate distance here, already set in fetchServices
 
     filtered.sort((a, b) => {
       switch (sortBy) {
-        case "rating":
-          return b.average_rating - a.average_rating;
-        case "price_low":
-          return a.price_per_hour - b.price_per_hour;
-        case "price_high":
-          return b.price_per_hour - a.price_per_hour;
-        case "distance":
-          return (a.distance ?? Infinity) - (b.distance ?? Infinity);
-        case "reviews":
-          return b.total_reviews - a.total_reviews;
+        case 'rating':
+          return (b.average_rating || 0) - (a.average_rating || 0)
+        case 'price_low':
+          return (a.price_per_hour || 0) - (b.price_per_hour || 0)
+        case 'price_high':
+          return (b.price_per_hour || 0) - (a.price_per_hour || 0)
+        case 'distance':
+          return (a.distance || 999) - (b.distance || 999)
+        case 'reviews':
+          return (b.total_reviews || 0) - (a.total_reviews || 0)
         default:
-          return 0;
+          return 0
       }
-    });
+    })
 
-    setFilteredServices(filtered);
-  };
+    setFilteredServices(filtered)
+  }
 
   const handleBookService = (service) => {
     if (!user) {
-      toast.error("Please login to book a service");
-      return;
+      toast.error('Please login to book a service')
+      return
     }
-    setSelectedService(service);
-    setShowBookingModal(true);
-  };
+    setSelectedService(service)
+    setShowBookingModal(true)
+  }
+
+  const handleBookingCreated = () => {
+    toast.success('Booking request sent successfully!')
+    setShowBookingModal(false)
+    setSelectedService(null)
+  }
 
   const renderStars = (rating) => {
-    const stars = [];
-    const fullStars = Math.floor(rating);
-    const hasHalfStar = rating % 1 >= 0.5;
+    const stars = []
+    const fullStars = Math.floor(rating)
+    const hasHalfStar = rating % 1 >= 0.5
 
     for (let i = 0; i < fullStars; i++) {
-      stars.push(
-        <Star key={i} className="h-4 w-4 text-yellow-400 fill-current" />
-      );
+      stars.push(<Star key={i} className="h-4 w-4 text-yellow-400 fill-current" />)
     }
 
     if (hasHalfStar) {
-      stars.push(
-        <Star key="half" className="h-4 w-4 text-yellow-400 opacity-50" />
-      );
+      stars.push(<Star key="half" className="h-4 w-4 text-yellow-400 opacity-50" />)
     }
 
-    const empty = 5 - Math.ceil(rating);
+    const empty = 5 - Math.ceil(rating)
     for (let i = 0; i < empty; i++) {
-      stars.push(<Star key={`e-${i}`} className="h-4 w-4 text-white/50" />);
+      stars.push(<Star key={`e-${i}`} className="h-4 w-4 text-white/50" />)
     }
 
-    return stars;
-  };
+    return stars
+  }
 
   const ServiceCard = ({ service }) => (
     <div className="p-5 rounded-2xl bg-white/10 backdrop-blur-xl border border-white/20 shadow-2xl text-white hover:scale-105 transition-transform animate-slideUp">
       <div className="flex items-center mb-2">
         <div className="flex mr-2">{renderStars(service.average_rating)}</div>
         <span className="text-xs text-white/70">
-          ({service.total_reviews} review
-          {service.total_reviews !== 1 ? "s" : ""})
+          ({service.total_reviews} review{service.total_reviews !== 1 ? 's' : ''})
         </span>
       </div>
       <p className="text-sm mb-3 text-white/70 line-clamp-2">
@@ -235,19 +213,17 @@ export default function ServicesPage() {
           )}
         </div>
         <div className="flex items-center">
-          <DollarSign className="h-4 w-4 mr-2 text-teal-300" />₹
-          {service.price_per_hour}/hr
+          <DollarSign className="h-4 w-4 mr-2 text-teal-300" />
+          ₹{service.price_per_hour}/hr
         </div>
         <div className="flex items-center">
           <Clock className="h-4 w-4 mr-2 text-teal-300" />
-          {service.availability_hours || "Flexible"}
+          {service.availability_hours || 'Flexible'}
         </div>
       </div>
       <div className="flex items-center justify-between border-t pt-3 border-white/20">
         <div>
-          <p className="font-semibold text-white">
-            {service.profiles?.full_name}
-          </p>
+          <p className="font-semibold text-white">{service.profiles?.full_name}</p>
           <p className="capitalize text-white/70">{service.category}</p>
         </div>
         <button
@@ -258,7 +234,7 @@ export default function ServicesPage() {
         </button>
       </div>
     </div>
-  );
+  )
 
   if (loading || !isMounted) {
     return (
@@ -275,7 +251,7 @@ export default function ServicesPage() {
           </div>
         </div>
       </div>
-    );
+    )
   }
 
   return (
@@ -293,8 +269,8 @@ export default function ServicesPage() {
           </h1>
           <p className="text-white/70 mb-6 animate-fadeInSlide delay-200">
             {userLocation
-              ? "Top-rated professionals near you."
-              : "Browse services by category."}
+              ? 'Top-rated professionals near you.'
+              : 'Browse services by category.'}
           </p>
 
           <div className="relative mb-6 max-w-xl">
@@ -315,11 +291,11 @@ export default function ServicesPage() {
                 onClick={() => setSelectedCategory(cat)}
                 className={`px-3 py-1 text-sm rounded-lg capitalize transition animate-fadeInSlide delay-200 ${
                   selectedCategory === cat
-                    ? "bg-gradient-to-r from-teal-400 to-cyan-500 text-white"
-                    : "bg-white/10 text-white/70 hover:bg-white/20 border border-white/20"
+                    ? 'bg-gradient-to-r from-teal-400 to-cyan-500 text-white'
+                    : 'bg-white/10 text-white/70 hover:bg-white/20 border border-white/20'
                 }`}
               >
-                {cat === "all" ? "All" : cat}
+                {cat === 'all' ? 'All' : cat}
               </button>
             ))}
           </div>
@@ -338,8 +314,7 @@ export default function ServicesPage() {
             </select>
             {userLocation && (
               <div className="flex items-center text-teal-300 text-xs bg-white/10 backdrop-blur-xl px-3 py-1 rounded-lg border border-white/20 animate-fadeInSlide delay-200">
-                <Navigation className="h-3 w-3 mr-1 text-teal-300" /> Location
-                On
+                <Navigation className="h-3 w-3 mr-1 text-teal-300" /> Location On
               </div>
             )}
           </div>
@@ -356,22 +331,22 @@ export default function ServicesPage() {
             </div>
           )}
         </div>
-      </div>
 
-      {showBookingModal && selectedService && (
-        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 animate-fadeIn">
-          <div className="bg-white/10 backdrop-blur-xl border border-white/20 rounded-2xl p-6 w-full max-w-md shadow-2xl animate-slideUp">
-            <CreateBooking
-              service={selectedService}
-              onClose={() => setShowBookingModal(false)}
-              onBookingCreated={() => {
-                toast.success("Booking created!");
-                setShowBookingModal(false);
-              }}
-            />
+        {showBookingModal && selectedService && (
+          <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 animate-fadeIn">
+            <div className="bg-white/10 backdrop-blur-xl border border-white/20 rounded-2xl p-6 w-full max-w-md shadow-2xl animate-slideUp">
+              <CreateBooking
+                service={selectedService}
+                onClose={() => {
+                  setShowBookingModal(false)
+                  setSelectedService(null)
+                }}
+                onBookingCreated={handleBookingCreated}
+              />
+            </div>
           </div>
-        </div>
-      )}
+        )}
+      </div>
 
       <style jsx>{`
         @keyframes fadeIn {
@@ -447,5 +422,5 @@ export default function ServicesPage() {
         }
       `}</style>
     </div>
-  );
+  )
 }

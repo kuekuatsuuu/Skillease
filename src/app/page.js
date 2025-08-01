@@ -8,12 +8,12 @@ export default function HomePage() {
   const { user } = useAuth()
 
   const categories = [
-    { name: 'Electricians', icon: '⚡', count: '150+', color: 'from-yellow-400 to-orange-500' },
-    { name: 'Plumbers', icon: '🔧', count: '120+', color: 'from-blue-400 to-blue-600' },
-    { name: 'Tutors', icon: '📚', count: '200+', color: 'from-green-400 to-green-600' },
-    { name: 'Cleaners', icon: '🧹', count: '180+', color: 'from-purple-400 to-purple-600' },
-    { name: 'Fitness Trainers', icon: '💪', count: '90+', color: 'from-red-400 to-red-600' },
-    { name: 'Photographers', icon: '📸', count: '75+', color: 'from-pink-400 to-pink-600' }
+    { name: 'Electricians', icon: '⚡', color: 'from-yellow-400 to-orange-500' },
+    { name: 'Plumbers', icon: '🔧', color: 'from-blue-400 to-blue-600' },
+    { name: 'Tutors', icon: '📚', color: 'from-green-400 to-green-600' },
+    { name: 'Cleaners', icon: '🧹', color: 'from-purple-400 to-purple-600' },
+    { name: 'Fitness Trainers', icon: '💪', color: 'from-red-400 to-red-600' },
+    { name: 'Photographers', icon: '📸', color: 'from-pink-400 to-pink-600' }
   ]
 
   const features = [
@@ -198,7 +198,7 @@ export default function HomePage() {
         <section className="py-20 bg-transparent">
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <div className="text-center bg-black/30 backdrop-blur-xl border border-white/10 rounded-2xl p-8 mb-16 animate-slideUp">
-              <h2 className="text-4xl md:text-5xl font-bold text-white mb-6 animate-fadeInSlide">Why Choose LocalConnect?</h2>
+              <h2 className="text-4xl md:text-5xl font-bold text-white mb-6 animate-fadeInSlide">Why Choose Skillease?</h2>
               <p className="text-xl text-white/70 animate-fadeInSlide delay-200">Built for the modern local service economy</p>
             </div>
 
@@ -225,7 +225,7 @@ export default function HomePage() {
                 Ready to Get Started?
               </h2>
               <p className="text-xl text-white/70 mb-12 max-w-2xl mx-auto animate-fadeInSlide delay-200">
-                Join thousands of customers and providers already using LocalConnect to grow their business and find amazing services
+                Join thousands of customers and providers already using Skillease to grow their business and find amazing services
               </p>
               <div className="flex flex-col sm:flex-row gap-6 justify-center">
                 <Link 
